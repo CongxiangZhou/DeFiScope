@@ -1,0 +1,140 @@
+{
+  "protocols": [
+    {
+      "name": "Aave",
+      "chain": "Ethereum",
+      "category": "Lending",
+      "tvl": 12500000000,
+      "tvl_24h_change_pct": 1.2,
+      "audit_status": "AUDITED",
+      "auditors": ["OpenZeppelin", "Trail of Bits"],
+      "smart_contract_risk": 15,
+      "governance_score": 85,
+      "composite_risk_score": 20
+    },
+    {
+      "name": "Uniswap",
+      "chain": "Ethereum",
+      "category": "DEX",
+      "tvl": 5800000000,
+      "tvl_24h_change_pct": -0.5,
+      "audit_status": "AUDITED",
+      "auditors": ["Trail of Bits"],
+      "smart_contract_risk": 18,
+      "governance_score": 80,
+      "composite_risk_score": 25
+    },
+    {
+      "name": "Lido",
+      "chain": "Ethereum",
+      "category": "Liquid Staking",
+      "tvl": 15200000000,
+      "tvl_24h_change_pct": 0.8,
+      "audit_status": "AUDITED",
+      "auditors": ["Quantstamp", "MixBytes"],
+      "smart_contract_risk": 20,
+      "governance_score": 75,
+      "composite_risk_score": 28
+    },
+    {
+      "name": "Curve",
+      "chain": "Ethereum",
+      "category": "DEX",
+      "tvl": 2100000000,
+      "tvl_24h_change_pct": -2.3,
+      "audit_status": "AUDITED",
+      "auditors": ["Trail of Bits"],
+      "smart_contract_risk": 30,
+      "governance_score": 70,
+      "composite_risk_score": 35
+    },
+    {
+      "name": "MakerDAO",
+      "chain": "Ethereum",
+      "category": "CDP/Stablecoin",
+      "tvl": 8300000000,
+      "tvl_24h_change_pct": 0.3,
+      "audit_status": "AUDITED",
+      "auditors": ["Runtime Verification"],
+      "smart_contract_risk": 22,
+      "governance_score": 82,
+      "composite_risk_score": 24
+    },
+    {
+      "name": "GMX",
+      "chain": "Arbitrum",
+      "category": "Perpetuals",
+      "tvl": 520000000,
+      "tvl_24h_change_pct": 3.5,
+      "audit_status": "AUDITED",
+      "auditors": ["ABDK"],
+      "smart_contract_risk": 35,
+      "governance_score": 60,
+      "composite_risk_score": 42
+    },
+    {
+      "name": "PancakeSwap",
+      "chain": "BNB Chain",
+      "category": "DEX",
+      "tvl": 1800000000,
+      "tvl_24h_change_pct": -1.1,
+      "audit_status": "AUDITED",
+      "auditors": ["CertiK", "SlowMist"],
+      "smart_contract_risk": 28,
+      "governance_score": 65,
+      "composite_risk_score": 38
+    },
+    {
+      "name": "Compound",
+      "chain": "Ethereum",
+      "category": "Lending",
+      "tvl": 2900000000,
+      "tvl_24h_change_pct": 0.1,
+      "audit_status": "AUDITED",
+      "auditors": ["OpenZeppelin"],
+      "smart_contract_risk": 16,
+      "governance_score": 88,
+      "composite_risk_score": 18
+    },
+    {
+      "name": "Pendle",
+      "chain": "Ethereum",
+      "category": "Yield Trading",
+      "tvl": 680000000,
+      "tvl_24h_change_pct": 12.4,
+      "audit_status": "PARTIALLY_AUDITED",
+      "auditors": ["Ackee Blockchain"],
+      "smart_contract_risk": 40,
+      "governance_score": 55,
+      "composite_risk_score": 52
+    },
+    {
+      "name": "NewProtocolXYZ",
+      "chain": "Ethereum",
+      "category": "Yield Aggregator",
+      "tvl": 45000000,
+      "tvl_24h_change_pct": -18.7,
+      "audit_status": "UNAUDITED",
+      "auditors": [],
+      "smart_contract_risk": 80,
+      "governance_score": 20,
+      "composite_risk_score": 85
+    }
+  ],
+  "news_articles": [
+    {"title": "Aave V4 Proposal Passes Governance Vote with Strong Community Support", "source": "The Block", "date": "2026-03-01", "sentiment": "POSITIVE", "protocol_name": "Aave"},
+    {"title": "Aave TVL Reaches New 2026 High as Institutional Interest Grows", "source": "CoinDesk", "date": "2026-03-05", "sentiment": "POSITIVE", "protocol_name": "Aave"},
+    {"title": "Uniswap Foundation Faces Scrutiny Over Treasury Management", "source": "DL News", "date": "2026-03-02", "sentiment": "NEGATIVE", "protocol_name": "Uniswap"},
+    {"title": "Uniswap V4 Hooks Ecosystem Shows Steady Developer Adoption", "source": "The Block", "date": "2026-03-06", "sentiment": "POSITIVE", "protocol_name": "Uniswap"},
+    {"title": "Lido Dominance Raises Ethereum Centralization Concerns Among Validators", "source": "CoinDesk", "date": "2026-03-03", "sentiment": "NEGATIVE", "protocol_name": "Lido"},
+    {"title": "Lido Expands Multi-Chain Staking to Layer 2 Networks", "source": "Decrypt", "date": "2026-03-07", "sentiment": "POSITIVE", "protocol_name": "Lido"},
+    {"title": "Curve Founder Liquidation Saga Continues to Weigh on Protocol Confidence", "source": "The Defiant", "date": "2026-02-28", "sentiment": "NEGATIVE", "protocol_name": "Curve"},
+    {"title": "MakerDAO Rebrands to Sky Protocol, Community Reaction Mixed", "source": "CoinDesk", "date": "2026-03-04", "sentiment": "NEUTRAL", "protocol_name": "MakerDAO"},
+    {"title": "GMX V2 Volume Surges as Arbitrum Activity Hits Record", "source": "The Block", "date": "2026-03-03", "sentiment": "POSITIVE", "protocol_name": "GMX"},
+    {"title": "Pendle Yield Token Trading Volume Explodes 300% Amid Points Meta", "source": "Decrypt", "date": "2026-03-08", "sentiment": "POSITIVE", "protocol_name": "Pendle"},
+    {"title": "Pendle Smart Contract Bug Bounty Reveals Medium-Severity Vulnerability", "source": "Immunefi", "date": "2026-03-06", "sentiment": "NEGATIVE", "protocol_name": "Pendle"},
+    {"title": "Compound Treasury Governance Attack Attempt Thwarted by Community", "source": "The Block", "date": "2026-03-02", "sentiment": "NEUTRAL", "protocol_name": "Compound"},
+    {"title": "Unaudited DeFi Protocol NewProtocolXYZ Suffers Mysterious 18% TVL Drop", "source": "Rekt News", "date": "2026-03-09", "sentiment": "VERY_NEGATIVE", "protocol_name": "NewProtocolXYZ"},
+    {"title": "PancakeSwap Launches Revenue Sharing Program for CAKE Stakers", "source": "BSC News", "date": "2026-03-05", "sentiment": "POSITIVE", "protocol_name": "PancakeSwap"}
+  ]
+}

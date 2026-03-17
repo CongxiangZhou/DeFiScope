@@ -1,0 +1,27 @@
+# Environment & secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Conda/venv
+.conda/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Backup files
+*.bak
+.env.save
+.ipynb_checkpoints/
+env/
+env
