@@ -130,12 +130,12 @@ DeFiScope/
 
 ## Team
 
-| Member | Role | Key Contributions |
-|--------|------|-------------------|
-| **LIU Kefan** | Team Leader | System architecture, 4 agents, blockchain audit, Streamlit UI, LLM migration, documentation |
-| **RAVINJEET SINGH** | Configuration & Logging | Centralized config module, pipeline execution logger, integration testing |
-| **ZHOU Congxiang** | Visualization & UI | Plotly chart library, UI formatting helpers, usability testing |
-| **ZHU Ruiqi** | Testing & Validation | Unit test suite (28 tests), data validation, schema verification |
+| Member | Focus Area | Contributions |
+|--------|------------|---------------|
+| LIU Kefan | Architecture & Integration | Multi-agent pipeline, blockchain audit module, Streamlit frontend, LLM backend migration |
+| RAVINJEET SINGH | Configuration & Logging | Centralized config module, pipeline execution logger, integration testing |
+| ZHOU Congxiang | Visualization & UI | Plotly chart library, UI formatting helpers, usability testing |
+| ZHU Ruiqi | Testing & Validation | Unit test suite (28 tests), data validation, schema verification |
 
 ---
 
