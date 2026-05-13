@@ -104,7 +104,7 @@ class DataSnapshot:
                     "tvl": p.get("tvl", 0),
                     "tvl_change_24h": p.get("change_1d", 0) or 0,
                     "audit_status": "audited" if p.get("audits") and p.get("audits") != "0" else "unaudited",
-                    "smart_contract_risk_score": 85 if p.get("audits") else 40, 
+                    "smart_contract_risk_score": 25 if p.get("audits") else 75,
                     "governance_score": 75 
                 })
             

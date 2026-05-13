@@ -531,9 +531,10 @@ st.markdown(
 )
 
 
-@st.cache_resource
 def get_executor():
-    return ThreadPoolExecutor(max_workers=1)
+    if "recommendation_executor" not in st.session_state:
+        st.session_state.recommendation_executor = ThreadPoolExecutor(max_workers=1)
+    return st.session_state.recommendation_executor
 
 
 # ──────────────────────────────────────────────
@@ -564,6 +565,17 @@ def init_session():
         st.session_state.audit_module = BlockchainAuditModule()
     if "recommendation_job" not in st.session_state:
         st.session_state.recommendation_job = None
+    if "has_live_data" not in st.session_state:
+        st.session_state.has_live_data = False
+    if "use_live_data_toggle" not in st.session_state:
+        st.session_state.use_live_data_toggle = st.session_state.has_live_data
+    if "reset_live_data_toggle_next_run" not in st.session_state:
+        st.session_state.reset_live_data_toggle_next_run = False
+    if "live_data_error" not in st.session_state:
+        st.session_state.live_data_error = ""
+    if st.session_state.reset_live_data_toggle_next_run:
+        st.session_state.use_live_data_toggle = False
+        st.session_state.reset_live_data_toggle_next_run = False
     if "recommendation_status" not in st.session_state:
         st.session_state.recommendation_status = ""
     if "recommendation_error" not in st.session_state:
@@ -777,51 +789,6 @@ def normalize_recommendation_markdown(text: str) -> str:
         normalized.append(line)
 
     return "\n".join(normalized).strip()
-
-def allocation_markdown_from_risk_output(risk_output: dict) -> str:
-    allocation = risk_output.get("recommended_allocation", [])
-    if not allocation:
-        return ""
-
-    rows = [
-        "### Recommended Allocation",
-        "",
-        "| Protocol | Weight (%) | Rationale |",
-        "|---|---:|---|",
-    ]
-    for item in allocation:
-        rows.append(
-            f"| {item.get('protocol', '')} | {item.get('weight_pct', '')} | {item.get('rationale', '')} |"
-        )
-    return "\n".join(rows)
-
-def complete_final_recommendation_markdown(text: str, risk_output: dict) -> str:
-    """Replace incomplete model allocation tables with the structured allocation."""
-    normalized = normalize_recommendation_markdown(text)
-    allocation_markdown = allocation_markdown_from_risk_output(risk_output)
-    if not allocation_markdown:
-        return normalized
-
-    lines = normalized.splitlines()
-    for index, line in enumerate(lines):
-        if "Recommended Allocation" not in line:
-            continue
-
-        section_lines = []
-        next_heading_index = len(lines)
-        for cursor in range(index + 1, len(lines)):
-            if lines[cursor].startswith("### "):
-                next_heading_index = cursor
-                break
-            if lines[cursor].strip():
-                section_lines.append(lines[cursor].strip())
-
-        table_rows = [row for row in section_lines if row.startswith("|")]
-        has_data_row = len(table_rows) >= 3
-        if not has_data_row:
-            return "\n".join(lines[:index] + allocation_markdown.splitlines() + lines[next_heading_index:]).strip()
-
-    return normalized
 
 def get_markdown_heading_title(line: str) -> str:
     stripped = line.strip()
@@ -1746,7 +1713,7 @@ with body_col:
         with m_col1:
             st.markdown('<div class="market-page-title">DeFi Market Overview</div>', unsafe_allow_html=True)
         with m_col2:
-            use_live_toggle = st.toggle("Use Live Data", value=st.session_state.get("has_live_data", False))
+            use_live_toggle = st.toggle("Use Live Data", key="use_live_data_toggle")
             
             if use_live_toggle and not st.session_state.get("has_live_data", False):
                 with st.spinner("Fetching data from DeFi Llama..."):
@@ -1758,14 +1725,23 @@ with body_col:
 
                     if success:
                         st.session_state.has_live_data = True
+                        st.session_state.live_data_error = ""
                         st.rerun()
                     else:
-                        st.error(f"Failed to fetch live data: {error_msg}. Please manually toggle off to return to mock data.")
+                        st.session_state.has_live_data = False
+                        st.session_state.live_data_error = f"Failed to fetch live data: {error_msg}. Staying on mock data."
+                        st.session_state.reset_live_data_toggle_next_run = True
+                        st.rerun()
             
             elif not use_live_toggle and st.session_state.get("has_live_data", False):
                 st.session_state.data_snapshot.load_local()
                 st.session_state.has_live_data = False
+                st.session_state.live_data_error = ""
                 st.rerun()
+
+        if st.session_state.live_data_error:
+            st.error(st.session_state.live_data_error)
+            st.session_state.live_data_error = ""
 
         # Check if live data flag exists
         if st.session_state.get("has_live_data"):

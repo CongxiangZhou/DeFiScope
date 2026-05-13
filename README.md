@@ -33,7 +33,7 @@ DeFiScope is a web-based multi-agent system that delivers personalized risk asse
                               │
                               ▼
                ┌─────────────────────────────┐
-               │   Integrity Hash Module     │
+               │   BlockchainAuditModule     │
                │     (SHA-256 Verify)        │
                └─────────────────────────────┘
                               │
