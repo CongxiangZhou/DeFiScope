@@ -12,12 +12,19 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
+try:
+    from json import JSONDecodeError
+except ImportError:
+    JSONDecodeError = ValueError
+
 
 # ──────────────────────────────────────────────
 # Ollama Configuration — 换模型只改这里
 # ──────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
 # ──────────────────────────────────────────────
@@ -71,10 +78,42 @@ class Recommendation:
 
 class DataSnapshot:
     def __init__(self, filepath: str = "mock_data.json"):
-        with open(filepath, "r") as f:
+        self.filepath = filepath
+        self.load_local()
+
+    def load_local(self):
+        with open(self.filepath, "r") as f:
             raw = json.load(f)
         self.protocols = raw["protocols"]
         self.news_articles = raw["news_articles"]
+
+    def fetch_live_data(self):
+        try:
+            # Provide a standard User-Agent, some APIs block default Python requests
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            response = requests.get("https://api.llama.fi/protocols", headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            live_protocols = []
+            for p in data[:50]:
+                live_protocols.append({
+                    "name": p.get("name", "Unknown"),
+                    "chain": p.get("chain", "Multi"),
+                    "category": p.get("category", "DeFi"),
+                    "tvl": p.get("tvl", 0),
+                    "tvl_change_24h": p.get("change_1d", 0) or 0,
+                    "audit_status": "audited" if p.get("audits") and p.get("audits") != "0" else "unaudited",
+                    "smart_contract_risk_score": 85 if p.get("audits") else 40, 
+                    "governance_score": 75 
+                })
+            
+            self.protocols = live_protocols
+            return True, "Success"
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Failed to fetch live data: {error_msg}")
+            return False, error_msg
 
     def get_all_protocols(self):
         return self.protocols
@@ -94,15 +133,23 @@ class DataSnapshot:
 # ──────────────────────────────────────────────
 
 class BaseAgent:
-    def __init__(self, agent_name: str, system_prompt: str, api_key: str = ""):
+    def __init__(self, agent_name: str, system_prompt: str, api_key: str = "", llm_provider: str = "ollama", gemini_model: str = GEMINI_MODEL):
         """
-        api_key 参数保留（默认空字符串）但不再使用，
-        这样所有子类的 __init__ 签名和 app.py 的调用代码都不需要改。
+        api_key is used only when llm_provider="gemini".
+        Local Ollama remains the default so the app still works offline.
         """
         self.agent_name = agent_name
         self.system_prompt = system_prompt
+        self.api_key = api_key
+        self.llm_provider = llm_provider
+        self.gemini_model = gemini_model
 
-    def call_llm(self, prompt: str) -> str:
+    def call_llm(self, prompt: str, require_json: bool = False) -> str:
+        if self.llm_provider == "gemini":
+            return self.call_gemini(prompt, require_json=require_json)
+        return self.call_ollama(prompt, require_json=require_json)
+
+    def call_ollama(self, prompt: str, require_json: bool = False) -> str:
         """Call local Ollama REST API and return text response."""
         full_prompt = f"{self.system_prompt}\n\n{prompt}"
 
@@ -115,6 +162,10 @@ class BaseAgent:
                 "num_predict": 4096,
             }
         }
+        
+        # Enforce JSON formatting if supported and requested
+        if require_json:
+            payload["format"] = "json"
 
         for attempt in range(3):
             try:
@@ -149,22 +200,114 @@ class BaseAgent:
                 else:
                     raise RuntimeError(f"[{self.agent_name}] LLM call failed after 3 attempts: {e}")
 
+    def call_gemini(self, prompt: str, require_json: bool = False) -> str:
+        """Call Gemini generateContent REST API and return text response."""
+        if not self.api_key:
+            raise RuntimeError("Gemini API key is required when using Gemini.")
+
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": self.system_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 4096,
+            },
+        }
+
+        if require_json:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
+
+        for attempt in range(3):
+            try:
+                print(f"[{self.agent_name}] Calling Gemini ({self.gemini_model})... (attempt {attempt + 1})")
+                start = time.time()
+                response = requests.post(
+                    f"{GEMINI_BASE_URL}/models/{self.gemini_model}:generateContent",
+                    headers=headers,
+                    json=payload,
+                    timeout=180,
+                )
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_hint = f" Wait about {retry_after} seconds before trying again." if retry_after else " Wait a minute before trying again."
+                    raise RuntimeError(
+                        f"[{self.agent_name}] Gemini rate/resource limit hit for {self.gemini_model}.{wait_hint} "
+                        "One DeFiScope recommendation uses multiple Gemini calls, so visible dashboard usage can still look low."
+                    )
+                response.raise_for_status()
+                result = response.json()
+                elapsed = time.time() - start
+                print(f"[{self.agent_name}] Done in {elapsed:.1f}s")
+
+                parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                text_parts = [part.get("text", "") for part in parts if part.get("text")]
+                return "\n".join(text_parts).strip()
+
+            except Exception as e:
+                if "Gemini rate/resource limit hit" in str(e):
+                    raise
+                if attempt < 2:
+                    print(f"[{self.agent_name}] Gemini error: {e}, retrying...")
+                    time.sleep(2)
+                else:
+                    raise RuntimeError(f"[{self.agent_name}] Gemini call failed after 3 attempts: {e}")
+
     def parse_json(self, raw: str) -> dict:
-        """Extract JSON from LLM response (handles markdown fences)."""
+        """Extract JSON from LLM response (handles markdown fences and <think> tags)."""
+        import re
         text = raw.strip()
+        
+        # Remove <think>...</think> blocks common in local models
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        
         if text.startswith("```"):
             lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines)
+            lines = [l for l in lines if not l.strip().startswith("```") and not l.strip().startswith("json")]
+            text = "\n".join(lines).strip()
+            
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
-            # Try to find JSON block within the text
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end > start:
-                return json.loads(text[start:end])
-            raise ValueError(f"[{self.agent_name}] Could not parse JSON from response")
+        except JSONDecodeError:
+            # Try to find JSON block within the text via regex
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except JSONDecodeError:
+                    pass
+            repaired = self.repair_json_response(text)
+            if repaired:
+                return repaired
+            raise ValueError(f"[{self.agent_name}] Could not parse JSON from response\nRaw Response: {raw[:200]}...")
+
+    def repair_json_response(self, text: str) -> dict | None:
+        """Best-effort repair for common LLM JSON issues such as truncated arrays."""
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        candidate = text[start:].strip()
+        if not candidate:
+            return None
+
+        for suffix in ("", "\n]}", "\n}", "\n]}"):
+            try:
+                return json.loads(candidate + suffix)
+            except JSONDecodeError:
+                continue
+        return None
 
     def run(self, input_data: dict) -> AgentOutput:
         raise NotImplementedError
@@ -198,14 +341,18 @@ Respond ONLY with a valid JSON object in this format:
 
 
 class ChainAgent(BaseAgent):
-    def __init__(self, api_key: str, data_snapshot: DataSnapshot):
-        super().__init__("ChainAgent", CHAIN_AGENT_PROMPT, api_key)
+    def __init__(self, api_key: str, data_snapshot: DataSnapshot, llm_provider: str = "ollama", gemini_model: str = GEMINI_MODEL):
+        super().__init__("ChainAgent", CHAIN_AGENT_PROMPT, api_key, llm_provider, gemini_model)
         self.data_snapshot = data_snapshot
 
     def run(self, input_data: dict = None) -> AgentOutput:
-        protocols = self.data_snapshot.get_all_protocols()
+        protocols = sorted(
+            self.data_snapshot.get_all_protocols(),
+            key=lambda item: item.get("tvl", 0) or 0,
+            reverse=True,
+        )[:12]
         prompt = f"Analyze the following DeFi protocol data and produce a risk assessment:\n\n{json.dumps(protocols, indent=2)}"
-        raw = self.call_llm(prompt)
+        raw = self.call_llm(prompt, require_json=True)
         result = self.parse_json(raw)
         return AgentOutput(agent_name="ChainAgent", output_json=result)
 
@@ -237,14 +384,16 @@ Respond ONLY with a valid JSON object in this format:
 
 
 class SentimentAgent(BaseAgent):
-    def __init__(self, api_key: str, data_snapshot: DataSnapshot):
-        super().__init__("SentimentAgent", SENTIMENT_AGENT_PROMPT, api_key)
+    def __init__(self, api_key: str, data_snapshot: DataSnapshot, llm_provider: str = "ollama", gemini_model: str = GEMINI_MODEL):
+        super().__init__("SentimentAgent", SENTIMENT_AGENT_PROMPT, api_key, llm_provider, gemini_model)
         self.data_snapshot = data_snapshot
 
     def run(self, input_data: dict = None) -> AgentOutput:
         articles = self.data_snapshot.news_articles
-        prompt = f"Analyze the sentiment of the following crypto news articles:\n\n{json.dumps(articles, indent=2)}"
-        raw = self.call_llm(prompt)
+        # If no articles, still provide an empty array so LLM returns valid layout
+        val = articles if articles else []
+        prompt = f"Analyze the sentiment of the following crypto news articles:\n\n{json.dumps(val, indent=2)}"
+        raw = self.call_llm(prompt, require_json=True)
         result = self.parse_json(raw)
         return AgentOutput(agent_name="SentimentAgent", output_json=result)
 
@@ -286,8 +435,8 @@ Respond ONLY with a valid JSON object in this format:
 
 
 class RiskProfileAgent(BaseAgent):
-    def __init__(self, api_key: str):
-        super().__init__("RiskProfileAgent", RISK_PROFILE_PROMPT, api_key)
+    def __init__(self, api_key: str, llm_provider: str = "ollama", gemini_model: str = GEMINI_MODEL):
+        super().__init__("RiskProfileAgent", RISK_PROFILE_PROMPT, api_key, llm_provider, gemini_model)
 
     def run(self, input_data: dict) -> AgentOutput:
         prompt = (
@@ -296,7 +445,7 @@ class RiskProfileAgent(BaseAgent):
             f"SentimentAgent Analysis:\n{json.dumps(input_data['sentiment_output'], indent=2)}\n\n"
             f"Generate a personalized portfolio allocation for this user."
         )
-        raw = self.call_llm(prompt)
+        raw = self.call_llm(prompt, require_json=True)
         result = self.parse_json(raw)
         return AgentOutput(agent_name="RiskProfileAgent", output_json=result)
 
@@ -332,8 +481,8 @@ When asked to SYNTHESIZE, produce a comprehensive Markdown recommendation includ
 
 
 class OrchestratorAgent(BaseAgent):
-    def __init__(self, api_key: str, chain_agent: ChainAgent, sentiment_agent: SentimentAgent, risk_profile_agent: RiskProfileAgent):
-        super().__init__("OrchestratorAgent", ORCHESTRATOR_PROMPT, api_key)
+    def __init__(self, api_key: str, chain_agent: ChainAgent, sentiment_agent: SentimentAgent, risk_profile_agent: RiskProfileAgent, llm_provider: str = "ollama", gemini_model: str = GEMINI_MODEL):
+        super().__init__("OrchestratorAgent", ORCHESTRATOR_PROMPT, api_key, llm_provider, gemini_model)
         self.chain_agent = chain_agent
         self.sentiment_agent = sentiment_agent
         self.risk_profile_agent = risk_profile_agent
@@ -344,7 +493,7 @@ class OrchestratorAgent(BaseAgent):
             f"User Query: \"{query}\"\n\n"
             f"Respond with the JSON goal tree only."
         )
-        raw = self.call_llm(prompt)
+        raw = self.call_llm(prompt, require_json=True)
         tree_dict = self.parse_json(raw)
         return GoalTree(root_goal=tree_dict.get("root_goal", query), sub_goals=tree_dict.get("sub_goals", []))
 
