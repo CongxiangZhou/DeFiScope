@@ -5,10 +5,10 @@ Run with: streamlit run app.py
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import copy
 import html
 import json
 import os
-import time
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -741,6 +741,13 @@ def generate_recommendation(
     rec.sha256_hash = hash_record["sha256_hash"]
     return rec
 
+def clone_data_snapshot(data_snapshot: DataSnapshot) -> DataSnapshot:
+    snapshot = DataSnapshot.__new__(DataSnapshot)
+    snapshot.filepath = data_snapshot.filepath
+    snapshot.protocols = copy.deepcopy(data_snapshot.get_all_protocols())
+    snapshot.news_articles = copy.deepcopy(getattr(data_snapshot, "news_articles", []))
+    return snapshot
+
 def harvest_recommendation_job():
     job = st.session_state.recommendation_job
     if not job or not job.done():
@@ -801,6 +808,47 @@ def get_processing_message(provider: str = "ollama", model_name: str = "") -> st
         model_text = model_name or GEMINI_MODEL
         return f"Processing in the background with Gemini ({model_text})."
     return "Processing in the background with local Ollama (qwen2.5:7b)."
+
+def render_recommendation_result_content():
+    if st.session_state.recommendation_error:
+        st.error(f"Pipeline error: {st.session_state.recommendation_error}")
+        st.info("If you selected Ollama, check that Ollama is running. If you selected Gemini, check the API key and model name.")
+    elif st.session_state.recommendation_status:
+        st.success(st.session_state.recommendation_status)
+
+    visible_index = st.session_state.visible_recommendation_index
+    if visible_index is not None and 0 <= visible_index < len(st.session_state.recommendations):
+        st.divider()
+        st.caption("Most recent recommendation")
+        latest_entry = st.session_state.recommendations[visible_index]
+        st.caption(f"Profile: {get_entry_profile_name(latest_entry)}")
+        render_recommendation(get_entry_recommendation(latest_entry))
+
+@st.fragment(run_every=2)
+def render_background_recommendation_job_status():
+    if st.session_state.recommendation_job and st.session_state.recommendation_job.done():
+        harvest_recommendation_job()
+        st.rerun()
+
+    if is_recommendation_running():
+        st.info(
+            get_processing_message(
+                st.session_state.pending_recommendation_provider,
+                st.session_state.pending_recommendation_model,
+            )
+        )
+
+@st.fragment(run_every=2)
+def render_recommendation_job_status():
+    if st.session_state.recommendation_job and st.session_state.recommendation_job.done():
+        harvest_recommendation_job()
+        st.rerun()
+
+    if is_recommendation_running():
+        render_processing_indicator(
+            st.session_state.pending_recommendation_provider,
+            st.session_state.pending_recommendation_model,
+        )
 
 def install_query_tab_autofill(sample_query: str):
     sample = json.dumps(sample_query)
@@ -973,7 +1021,10 @@ def install_text_input_autocommit():
                 }
 
                 input.dataset.defiscopeAutocommit = "true";
-                input.addEventListener("input", () => {
+                input.addEventListener("input", (event) => {
+                    if (!event.isTrusted || input.dataset.defiscopeCommitting === "true") {
+                        return;
+                    }
                     clearTimeout(input.__defiscopeCommitTimer);
                     input.__defiscopeCommitTimer = setTimeout(() => commitInput(input), 700);
                 });
@@ -1035,13 +1086,10 @@ render_top_navigation(page)
 _, body_col, _ = st.columns([1, 5.9, 1], gap="small")
 
 with body_col:
-    if is_recommendation_running() and page != "Get Recommendation":
-        st.info(
-            get_processing_message(
-                st.session_state.pending_recommendation_provider,
-                st.session_state.pending_recommendation_model,
-            )
-        )
+    if st.session_state.recommendation_job and page != "Get Recommendation":
+        render_background_recommendation_job_status()
+    elif st.session_state.recommendation_status and page != "Get Recommendation":
+        st.success("Process complete. Recommendation generated successfully.")
 
 
     # ──────────────────────────────────────────────
@@ -1322,40 +1370,17 @@ with body_col:
                 generate_recommendation,
                 submitted_query,
                 profile_snapshot,
-                st.session_state.data_snapshot,
+                clone_data_snapshot(st.session_state.data_snapshot),
                 llm_provider,
                 gemini_api_key.strip(),
                 selected_gemini_model,
             )
             st.rerun()
 
-        result_area = st.empty()
-        
-        # Loop and check status if running
-        if is_recommendation_running():
-            with result_area.container():
-                render_processing_indicator(
-                    st.session_state.pending_recommendation_provider,
-                    st.session_state.pending_recommendation_model,
-                )
-            time.sleep(2)
-            harvest_recommendation_job()
-            st.rerun()
-
-        with result_area.container():
-            if st.session_state.recommendation_error:
-                st.error(f"Pipeline error: {st.session_state.recommendation_error}")
-                st.info("If you selected Ollama, check that Ollama is running. If you selected Gemini, check the API key and model name.")
-            elif st.session_state.recommendation_status:
-                st.success(st.session_state.recommendation_status)
-
-            visible_index = st.session_state.visible_recommendation_index
-            if visible_index is not None and 0 <= visible_index < len(st.session_state.recommendations):
-                st.divider()
-                st.caption("Most recent recommendation")
-                latest_entry = st.session_state.recommendations[visible_index]
-                st.caption(f"Profile: {get_entry_profile_name(latest_entry)}")
-                render_recommendation(get_entry_recommendation(latest_entry))
+        if st.session_state.recommendation_job:
+            render_recommendation_job_status()
+        else:
+            render_recommendation_result_content()
 
 
     # ──────────────────────────────────────────────
