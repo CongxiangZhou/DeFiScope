@@ -9,12 +9,14 @@ import copy
 import html
 import json
 import os
+import threading
+import time
 
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.express as px
 
-from agents import DataSnapshot, ChainAgent, SentimentAgent, RiskProfileAgent, OrchestratorAgent, GEMINI_MODEL
+from agents import DataSnapshot, ChainAgent, SentimentAgent, RiskProfileAgent, OrchestratorAgent, Recommendation, GEMINI_MODEL
 from blockchain_audit import BlockchainAuditModule
 
 # ──────────────────────────────────────────────
@@ -37,6 +39,80 @@ NAV_LABELS = {
     "Get Recommendation": "Recommendation",
     "History": "History",
 }
+PIPELINE_STEPS = [
+    (1, "Goal Decomposition", "Break the query into top-level goals."),
+    (2, "Chain Analysis", "Score protocol risk from on-chain data."),
+    (3, "Sentiment Review", "Review market and news sentiment."),
+    (4, "Risk Matching", "Match allocation to the selected profile."),
+    (5, "Synthesis", "Merge agent outputs into a recommendation."),
+]
+AGENT_DEFINITIONS = [
+    ("OrchestratorAgent", "Orchestrator", "Coordinates goals and final synthesis."),
+    ("ChainAgent", "Chain Agent", "Evaluates protocol and smart-contract risk."),
+    ("SentimentAgent", "Sentiment Agent", "Assesses market and news tone."),
+    ("RiskProfileAgent", "Risk Profile Agent", "Matches allocation to user constraints."),
+]
+
+
+class RecommendationProgress:
+    def __init__(self, provider: str, model_name: str):
+        self._lock = threading.Lock()
+        self.provider = provider
+        self.model_name = model_name
+        self.started_at = time.time()
+        self.active_step = 0
+        self.completed_steps = []
+        self.message = "Preparing recommendation pipeline."
+        self.agent_states = default_agent_states("idle", "Waiting")
+        self.complete = False
+        self.error = ""
+
+    def update(self, active_step: int, completed_steps: list[int], agent_states: dict, message: str):
+        with self._lock:
+            self.active_step = active_step
+            self.completed_steps = list(completed_steps)
+            self.agent_states = copy.deepcopy(agent_states)
+            self.message = message
+
+    def finish(self):
+        with self._lock:
+            self.active_step = 0
+            self.completed_steps = [step[0] for step in PIPELINE_STEPS]
+            self.agent_states = {
+                "OrchestratorAgent": {"state": "done", "status_text": "Recommendation complete"},
+                "ChainAgent": {"state": "done", "status_text": "Protocol risk scored"},
+                "SentimentAgent": {"state": "done", "status_text": "Sentiment reviewed"},
+                "RiskProfileAgent": {"state": "done", "status_text": "Allocation matched"},
+            }
+            self.message = "Recommendation complete."
+            self.complete = True
+
+    def fail(self, error: str):
+        with self._lock:
+            self.error = error
+            self.message = "Pipeline stopped because an error occurred."
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "provider": self.provider,
+                "model_name": self.model_name,
+                "started_at": self.started_at,
+                "elapsed": time.time() - self.started_at,
+                "active_step": self.active_step,
+                "completed_steps": list(self.completed_steps),
+                "message": self.message,
+                "agent_states": copy.deepcopy(self.agent_states),
+                "complete": self.complete,
+                "error": self.error,
+            }
+
+
+def default_agent_states(state: str = "idle", status_text: str = "Waiting") -> dict:
+    return {
+        agent_id: {"state": state, "status_text": status_text}
+        for agent_id, _, _ in AGENT_DEFINITIONS
+    }
 
 st.markdown(
     """
@@ -196,6 +272,259 @@ st.markdown(
     @keyframes spin {
         to { transform: rotate(360deg); }
     }
+
+    .pipeline-panel {
+        border: 1px solid #dfe3ea;
+        border-radius: 0.65rem;
+        background: #ffffff;
+        padding: 1rem;
+        margin-top: 0;
+        box-shadow: 0 10px 30px rgba(28, 34, 48, 0.08);
+    }
+
+    .pipeline-overlay {
+        position: fixed;
+        top: 8.1rem;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 900;
+        background: rgba(255, 255, 255, 0.78);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 1.2rem 1rem 2rem;
+        overflow-y: auto;
+        pointer-events: none;
+    }
+
+    .pipeline-overlay-card {
+        width: min(980px, calc(100vw - 2rem));
+        pointer-events: auto;
+    }
+
+    .pipeline-panel-title {
+        font-size: 1rem;
+        font-weight: 750;
+        color: #272b36;
+        margin-bottom: 0.2rem;
+    }
+
+    .pipeline-panel-subtitle {
+        font-size: 0.82rem;
+        color: #667085;
+        margin-bottom: 0.9rem;
+    }
+
+    .pipeline-steps {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.55rem;
+        margin-bottom: 0.9rem;
+    }
+
+    .pipeline-step {
+        border: 1px solid #e1e5ed;
+        border-radius: 0.55rem;
+        padding: 0.65rem 0.55rem;
+        background: #f8fafc;
+        min-height: 5.2rem;
+    }
+
+    .pipeline-step.done {
+        border-color: #bfe5ce;
+        background: #f3fbf6;
+    }
+
+    .pipeline-step.active {
+        border-color: #ffb6b6;
+        background: #fff6f6;
+        box-shadow: inset 0 0 0 1px rgba(255, 75, 75, 0.15);
+    }
+
+    .pipeline-step-number {
+        width: 1.55rem;
+        height: 1.55rem;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.78rem;
+        font-weight: 750;
+        color: #667085;
+        background: #edf1f6;
+        margin-bottom: 0.38rem;
+    }
+
+    .pipeline-step.done .pipeline-step-number {
+        color: #ffffff;
+        background: #1f9d55;
+    }
+
+    .pipeline-step.active .pipeline-step-number {
+        color: #ffffff;
+        background: #ff4b4b;
+    }
+
+    .pipeline-step-name {
+        font-size: 0.78rem;
+        font-weight: 750;
+        color: #272b36;
+        line-height: 1.25;
+    }
+
+    .pipeline-step-desc {
+        font-size: 0.72rem;
+        color: #667085;
+        line-height: 1.25;
+        margin-top: 0.18rem;
+    }
+
+    .agent-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem;
+    }
+
+    .agent-card {
+        border: 1px solid #e1e5ed;
+        border-radius: 0.55rem;
+        padding: 0.7rem 0.8rem;
+        background: #ffffff;
+    }
+
+    .agent-card.running {
+        border-color: #ffb6b6;
+        background: #fff6f6;
+    }
+
+    .agent-card.done {
+        border-color: #bfe5ce;
+        background: #f3fbf6;
+    }
+
+    .agent-name {
+        font-size: 0.86rem;
+        font-weight: 750;
+        color: #272b36;
+    }
+
+    .agent-role {
+        font-size: 0.74rem;
+        color: #667085;
+        margin-top: 0.08rem;
+    }
+
+    .agent-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 0.45rem;
+        font-size: 0.75rem;
+        font-weight: 650;
+        color: #667085;
+    }
+
+    .agent-card.running .agent-status {
+        color: #b42318;
+    }
+
+    .agent-card.done .agent-status {
+        color: #137333;
+    }
+
+    .agent-dot {
+        width: 0.46rem;
+        height: 0.46rem;
+        border-radius: 999px;
+        background: currentColor;
+    }
+
+    .agent-card.running .agent-dot {
+        animation: pulse-dot 1.2s ease-in-out infinite;
+    }
+
+    .market-metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
+        margin: 0.5rem 0 0.95rem;
+    }
+
+    .market-metric-card {
+        border: 1px solid #dfe3ea;
+        border-radius: 0.65rem;
+        background: #ffffff;
+        padding: 0.9rem 1rem;
+        min-height: 5.25rem;
+        box-shadow: 0 8px 22px rgba(28, 34, 48, 0.04);
+    }
+
+    .market-metric-label {
+        font-size: 0.78rem;
+        color: #667085;
+        font-weight: 650;
+        line-height: 1.2;
+        margin-bottom: 0.45rem;
+    }
+
+    .market-metric-value {
+        font-size: 1.55rem;
+        line-height: 1.1;
+        color: #272b36;
+        font-weight: 800;
+    }
+
+    .market-metric-note {
+        margin-top: 0.35rem;
+        font-size: 0.72rem;
+        line-height: 1.25;
+        color: #667085;
+    }
+
+    .market-page-title {
+        color: #272b36;
+        font-size: 2rem;
+        font-weight: 800;
+        line-height: 1.12;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .market-source-caption {
+        color: #7a808b;
+        font-size: 0.78rem;
+        line-height: 1.35;
+        margin: -0.25rem 0 0.2rem;
+    }
+
+    .market-source-caption code {
+        background: #f5f7fa;
+        color: #5b8f67;
+        border-radius: 0.25rem;
+        padding: 0.08rem 0.28rem;
+        font-size: 0.74rem;
+    }
+
+    @media (max-width: 980px) {
+        .market-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 0.35; transform: scale(0.9); }
+        50% { opacity: 1; transform: scale(1.18); }
+    }
+
+    @media (max-width: 900px) {
+        .pipeline-steps,
+        .agent-grid,
+        .market-metric-grid {
+            grid-template-columns: 1fr;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -245,6 +574,8 @@ def init_session():
         st.session_state.pending_recommendation_provider = "ollama"
     if "pending_recommendation_model" not in st.session_state:
         st.session_state.pending_recommendation_model = ""
+    if "recommendation_progress" not in st.session_state:
+        st.session_state.recommendation_progress = None
     if "selected_llm_provider" not in st.session_state:
         st.session_state.selected_llm_provider = "ollama"
     if "use_gemini_provider" not in st.session_state:
@@ -377,6 +708,46 @@ def get_sentiment_score(protocol_name: str) -> int:
         return 0
     total = sum(SENTIMENT_SCORES.get(a.get("sentiment", "NEUTRAL"), 0) for a in articles)
     return round(total / len(articles))
+
+def is_protocol_audited(protocol: dict) -> bool:
+    audit_status = str(protocol.get("audit_status", "")).upper()
+    if "UNAUDIT" in audit_status or audit_status in {"", "UNKNOWN", "NONE"}:
+        return False
+    return "AUDIT" in audit_status
+
+def get_protocol_risk_score(protocol: dict) -> float:
+    return float(
+        protocol.get(
+            "composite_risk_score",
+            protocol.get("smart_contract_risk_score", protocol.get("smart_contract_risk", 50)),
+        )
+    )
+
+def get_protocol_change(protocol: dict) -> float:
+    value = protocol.get("tvl_24h_change_pct", protocol.get("tvl_change_24h", 0))
+    return float(value or 0)
+
+def render_market_metric_cards(protocols: list[dict]):
+    protocol_count = len(protocols)
+    total_tvl = sum(float(p.get("tvl", 0) or 0) for p in protocols) / 1e9
+    audited_count = sum(1 for p in protocols if is_protocol_audited(p))
+    avg_risk = sum(get_protocol_risk_score(p) for p in protocols) / max(protocol_count, 1)
+    gainers = sum(1 for p in protocols if get_protocol_change(p) > 0)
+    cards = [
+        ("Total TVL", f"${total_tvl:.1f}B", "Combined value locked across shown protocols."),
+        ("Audited Protocols", f"{audited_count}/{protocol_count}", "Protocols marked audited in the current dataset."),
+        ("Avg Risk Score", f"{avg_risk:.0f}/100", "Lower scores indicate lower modeled risk."),
+        ("Gainers (24h)", f"{gainers}/{protocol_count}", "Protocols with positive TVL movement."),
+    ]
+    cards_html = "".join(
+        f'<div class="market-metric-card">'
+        f'<div class="market-metric-label">{html.escape(label)}</div>'
+        f'<div class="market-metric-value">{html.escape(value)}</div>'
+        f'<div class="market-metric-note">{html.escape(note)}</div>'
+        f'</div>'
+        for label, value, note in cards
+    )
+    st.markdown(f'<div class="market-metric-grid">{cards_html}</div>', unsafe_allow_html=True)
 
 def clean_markdown(text: str) -> str:
     """Remove outer Markdown code fences sometimes returned by the local LLM."""
@@ -719,27 +1090,130 @@ def generate_recommendation(
     llm_provider: str = "ollama",
     gemini_api_key: str = "",
     gemini_model: str = GEMINI_MODEL,
+    progress: RecommendationProgress | None = None,
 ):
-    api_key = gemini_api_key if llm_provider == "gemini" else ""
-    chain_agent = ChainAgent(api_key, ds, llm_provider=llm_provider, gemini_model=gemini_model)
-    sentiment_agent = SentimentAgent(api_key, ds, llm_provider=llm_provider, gemini_model=gemini_model)
-    risk_profile_agent = RiskProfileAgent(api_key, llm_provider=llm_provider, gemini_model=gemini_model)
-    orchestrator = OrchestratorAgent(
-        api_key,
-        chain_agent,
-        sentiment_agent,
-        risk_profile_agent,
-        llm_provider=llm_provider,
-        gemini_model=gemini_model,
-    )
+    completed = []
 
-    rec = orchestrator.run(query, user_profile)
-    rec.final_text = normalize_recommendation_markdown(rec.final_text)
+    def update_progress(active_step: int, agent_states: dict, message: str):
+        if progress:
+            progress.update(active_step, completed, agent_states, message)
 
-    audit = BlockchainAuditModule()
-    hash_record = audit.record_hash(rec.to_dict())
-    rec.sha256_hash = hash_record["sha256_hash"]
-    return rec
+    try:
+        api_key = gemini_api_key if llm_provider == "gemini" else ""
+        chain_agent = ChainAgent(api_key, ds, llm_provider=llm_provider, gemini_model=gemini_model)
+        sentiment_agent = SentimentAgent(api_key, ds, llm_provider=llm_provider, gemini_model=gemini_model)
+        risk_profile_agent = RiskProfileAgent(api_key, llm_provider=llm_provider, gemini_model=gemini_model)
+        orchestrator = OrchestratorAgent(
+            api_key,
+            chain_agent,
+            sentiment_agent,
+            risk_profile_agent,
+            llm_provider=llm_provider,
+            gemini_model=gemini_model,
+        )
+
+        update_progress(
+            1,
+            {
+                "OrchestratorAgent": {"state": "running", "status_text": "Decomposing query"},
+                "ChainAgent": {"state": "idle", "status_text": "Waiting for goals"},
+                "SentimentAgent": {"state": "idle", "status_text": "Waiting for goals"},
+                "RiskProfileAgent": {"state": "idle", "status_text": "Waiting for analysis"},
+            },
+            "Orchestrator is decomposing the investment query.",
+        )
+        goal_tree = orchestrator.decompose_goals(query)
+        completed.append(1)
+
+        protocol_count = len(ds.get_all_protocols())
+        update_progress(
+            2,
+            {
+                "OrchestratorAgent": {"state": "done", "status_text": "Goal tree built"},
+                "ChainAgent": {"state": "running", "status_text": f"Scoring {protocol_count} protocols"},
+                "SentimentAgent": {"state": "idle", "status_text": "Waiting for chain output"},
+                "RiskProfileAgent": {"state": "idle", "status_text": "Waiting for upstream output"},
+            },
+            "Chain Agent is scoring protocol risk.",
+        )
+        chain_output = chain_agent.run()
+        completed.append(2)
+
+        article_count = len(getattr(ds, "news_articles", []))
+        update_progress(
+            3,
+            {
+                "OrchestratorAgent": {"state": "done", "status_text": "Goal tree built"},
+                "ChainAgent": {"state": "done", "status_text": "Protocol risk scored"},
+                "SentimentAgent": {"state": "running", "status_text": f"Reviewing {article_count} articles"},
+                "RiskProfileAgent": {"state": "idle", "status_text": "Waiting for sentiment output"},
+            },
+            "Sentiment Agent is reviewing market context.",
+        )
+        sentiment_output = sentiment_agent.run()
+        completed.append(3)
+
+        update_progress(
+            4,
+            {
+                "OrchestratorAgent": {"state": "done", "status_text": "Goal tree built"},
+                "ChainAgent": {"state": "done", "status_text": "Protocol risk scored"},
+                "SentimentAgent": {"state": "done", "status_text": "Sentiment reviewed"},
+                "RiskProfileAgent": {"state": "running", "status_text": "Matching allocation"},
+            },
+            "Risk Profile Agent is matching allocation to the selected profile.",
+        )
+        risk_output = risk_profile_agent.run({
+            "user_profile": user_profile,
+            "chain_output": chain_output.output_json,
+            "sentiment_output": sentiment_output.output_json,
+        })
+        completed.append(4)
+
+        update_progress(
+            5,
+            {
+                "OrchestratorAgent": {"state": "running", "status_text": "Synthesizing recommendation"},
+                "ChainAgent": {"state": "done", "status_text": "Protocol risk scored"},
+                "SentimentAgent": {"state": "done", "status_text": "Sentiment reviewed"},
+                "RiskProfileAgent": {"state": "done", "status_text": "Allocation matched"},
+            },
+            "Orchestrator is synthesizing the final recommendation.",
+        )
+        conflicts = orchestrator.detect_conflicts(chain_output.output_json, sentiment_output.output_json)
+        synthesis_prompt = (
+            f"SYNTHESIZE a unified portfolio recommendation.\n\n"
+            f"User Query: \"{query}\"\n"
+            f"User Profile: {json.dumps(user_profile)}\n\n"
+            f"Goal Tree:\n{json.dumps(goal_tree.to_dict(), indent=2)}\n\n"
+            f"ChainAgent Output:\n{json.dumps(chain_output.output_json, indent=2)}\n\n"
+            f"SentimentAgent Output:\n{json.dumps(sentiment_output.output_json, indent=2)}\n\n"
+            f"RiskProfileAgent Output:\n{json.dumps(risk_output.output_json, indent=2)}\n\n"
+            f"Detected Conflicts: {json.dumps(conflicts)}\n\n"
+            f"Produce the final Markdown recommendation."
+        )
+        final_text = orchestrator.call_llm(synthesis_prompt)
+
+        rec = Recommendation(
+            goal_tree=goal_tree,
+            chain_output=chain_output,
+            sentiment_output=sentiment_output,
+            risk_output=risk_output,
+            final_text=final_text,
+        )
+        rec.final_text = normalize_recommendation_markdown(rec.final_text)
+
+        audit = BlockchainAuditModule()
+        hash_record = audit.record_hash(rec.to_dict())
+        rec.sha256_hash = hash_record["sha256_hash"]
+        completed.append(5)
+        if progress:
+            progress.finish()
+        return rec
+    except Exception as e:
+        if progress:
+            progress.fail(str(e))
+        raise
 
 def clone_data_snapshot(data_snapshot: DataSnapshot) -> DataSnapshot:
     snapshot = DataSnapshot.__new__(DataSnapshot)
@@ -803,6 +1277,111 @@ def render_processing_indicator(provider: str = "ollama", model_name: str = ""):
         unsafe_allow_html=True,
     )
 
+def render_pipeline_activity_panel(progress_snapshot: dict | None = None, as_overlay: bool = False):
+    snapshot = progress_snapshot or {
+        "active_step": 0,
+        "completed_steps": [],
+        "message": "Waiting for recommendation processing to start.",
+        "elapsed": 0,
+        "agent_states": default_agent_states("idle", "Waiting"),
+        "complete": False,
+        "error": "",
+    }
+    completed_steps = set(snapshot.get("completed_steps", []))
+    active_step = snapshot.get("active_step", 0)
+    message = html.escape(snapshot.get("message", ""))
+    elapsed = snapshot.get("elapsed", 0)
+    started_at = snapshot.get("started_at", time.time())
+
+    steps_html = []
+    for step_id, name, desc in PIPELINE_STEPS:
+        if step_id in completed_steps:
+            state_class = "done"
+            indicator = "✓"
+        elif step_id == active_step:
+            state_class = "active"
+            indicator = str(step_id)
+        else:
+            state_class = ""
+            indicator = str(step_id)
+        steps_html.append(
+            f'<div class="pipeline-step {state_class}">'
+            f'<div class="pipeline-step-number">{html.escape(indicator)}</div>'
+            f'<div class="pipeline-step-name">{html.escape(name)}</div>'
+            f'<div class="pipeline-step-desc">{html.escape(desc)}</div>'
+            f'</div>'
+        )
+
+    agent_states = snapshot.get("agent_states", {})
+    agents_html = []
+    for agent_id, name, role in AGENT_DEFINITIONS:
+        info = agent_states.get(agent_id, {"state": "idle", "status_text": "Waiting"})
+        state = info.get("state", "idle")
+        state_class = state if state in {"running", "done"} else ""
+        status_text = html.escape(info.get("status_text", "Waiting"))
+        agents_html.append(
+            f'<div class="agent-card {state_class}">'
+            f'<div class="agent-name">{html.escape(name)}</div>'
+            f'<div class="agent-role">{html.escape(role)}</div>'
+            f'<div class="agent-status"><span class="agent-dot"></span>{status_text}</div>'
+            f'</div>'
+        )
+
+    panel_html = (
+        '<div class="pipeline-panel">'
+        '<div class="pipeline-panel-title">Pipeline Activity</div>'
+        f'<div class="pipeline-panel-subtitle">{message} Elapsed time: '
+        f'<span class="pipeline-elapsed" data-started-at="{started_at:.3f}">{elapsed:.0f}s</span>.</div>'
+        f'<div class="pipeline-steps">{"".join(steps_html)}</div>'
+        f'<div class="agent-grid">{"".join(agents_html)}</div>'
+        '</div>'
+    )
+    if as_overlay:
+        panel_html = f'<div class="pipeline-overlay"><div class="pipeline-overlay-card">{panel_html}</div></div>'
+
+    st.markdown(
+        panel_html,
+        unsafe_allow_html=True,
+    )
+
+def install_elapsed_timer():
+    components.html(
+        """
+        <script>
+        const parentWindow = window.parent;
+        const doc = parentWindow.document;
+
+        function updateElapsedTimers() {
+            doc.querySelectorAll(".pipeline-elapsed[data-started-at]").forEach((timer) => {
+                const startedAt = Number(timer.dataset.startedAt);
+                if (!Number.isFinite(startedAt)) {
+                    return;
+                }
+                const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+                timer.textContent = `${elapsed}s`;
+            });
+        }
+
+        if (parentWindow.__defiscopeElapsedTimerInterval) {
+            clearInterval(parentWindow.__defiscopeElapsedTimerInterval);
+        }
+        updateElapsedTimers();
+        parentWindow.__defiscopeElapsedTimerInterval = setInterval(updateElapsedTimers, 1000);
+        </script>
+        """,
+        height=0,
+    )
+
+def render_processing_popover():
+    progress = st.session_state.recommendation_progress
+    progress_snapshot = progress.snapshot() if progress else None
+    render_processing_indicator(
+        st.session_state.pending_recommendation_provider,
+        st.session_state.pending_recommendation_model,
+    )
+    render_pipeline_activity_panel(progress_snapshot, as_overlay=True)
+    install_elapsed_timer()
+
 def get_processing_message(provider: str = "ollama", model_name: str = "") -> str:
     if provider == "gemini":
         model_text = model_name or GEMINI_MODEL
@@ -824,7 +1403,7 @@ def render_recommendation_result_content():
         st.caption(f"Profile: {get_entry_profile_name(latest_entry)}")
         render_recommendation(get_entry_recommendation(latest_entry))
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=4)
 def render_background_recommendation_job_status():
     if st.session_state.recommendation_job and st.session_state.recommendation_job.done():
         harvest_recommendation_job()
@@ -838,17 +1417,14 @@ def render_background_recommendation_job_status():
             )
         )
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=4)
 def render_recommendation_job_status():
     if st.session_state.recommendation_job and st.session_state.recommendation_job.done():
         harvest_recommendation_job()
         st.rerun()
 
     if is_recommendation_running():
-        render_processing_indicator(
-            st.session_state.pending_recommendation_provider,
-            st.session_state.pending_recommendation_model,
-        )
+        render_processing_popover()
 
 def install_query_tab_autofill(sample_query: str):
     sample = json.dumps(sample_query)
@@ -1149,10 +1725,11 @@ with body_col:
     if page == "Risk Profile":
         title_col, action_col = st.columns([3, 1], vertical_alignment="center")
         with title_col:
-            st.title("Risk Profiles")
+            st.markdown('<div class="market-page-title">Risk Profiles</div>', unsafe_allow_html=True)
         with action_col:
             if st.button("Add New Profile", type="primary", use_container_width=True):
                 profile_dialog()
+        st.markdown('<div style="height:0.8rem"></div>', unsafe_allow_html=True)
 
         if st.session_state.profiles:
             st.dataframe(profile_table_rows(), use_container_width=True, hide_index=True)
@@ -1167,7 +1744,7 @@ with body_col:
     elif page == "Market Overview":
         m_col1, m_col2 = st.columns([3, 1], vertical_alignment="center")
         with m_col1:
-            st.title("DeFi Market Overview")
+            st.markdown('<div class="market-page-title">DeFi Market Overview</div>', unsafe_allow_html=True)
         with m_col2:
             use_live_toggle = st.toggle("Use Live Data", value=st.session_state.get("has_live_data", False))
             
@@ -1192,18 +1769,25 @@ with body_col:
 
         # Check if live data flag exists
         if st.session_state.get("has_live_data"):
-            st.caption("🟢 Currently displaying **Live Data** from DeFi Llama")
+            st.markdown(
+                '<div class="market-source-caption">Currently displaying live data from DeFi Llama.</div>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.caption("🔴 Currently displaying **Mock Data** (`mock_data.json`)")
+            st.markdown(
+                '<div class="market-source-caption">Currently displaying mock data from <code>mock_data.json</code>.</div>',
+                unsafe_allow_html=True,
+            )
 
         protocols = st.session_state.data_snapshot.get_all_protocols()
+        render_market_metric_cards(protocols)
 
         # Format for display
         display_data = []
         for p in protocols:
             tvl_val = p.get('tvl', 0)
             # Handle both local mock key and live fallback keys
-            change_val = p.get('tvl_24h_change_pct', p.get('tvl_change_24h', 0))
+            change_val = get_protocol_change(p)
             display_data.append({
                 "Protocol": p["name"],
                 "Chain": p["chain"],
@@ -1212,7 +1796,7 @@ with body_col:
                 "24h Change": f"{change_val:+.1f}%" if change_val is not None else "0.0%",
                 "Audit": p.get("audit_status", "unknown"),
                 "Sentiment Score": get_sentiment_score(p["name"]),
-                "Risk Score": p.get("composite_risk_score", 50),
+                "Risk Score": get_protocol_risk_score(p),
             })
 
         st.dataframe(display_data, use_container_width=True, hide_index=True)
@@ -1259,7 +1843,7 @@ with body_col:
 
         title_col, provider_col = st.columns([3, 1], vertical_alignment="center")
         with title_col:
-            st.title("Portfolio Recommendation")
+            st.markdown('<div class="market-page-title">Portfolio Recommendation</div>', unsafe_allow_html=True)
         with provider_col:
             st.toggle(
                 "Use Gemini",
@@ -1343,6 +1927,9 @@ with body_col:
             install_text_input_autocommit()
 
         if st.button("Get Recommendation", type="primary", use_container_width=True, disabled=running):
+            if is_recommendation_running():
+                st.warning("A recommendation is already processing. Wait until it completes before starting another one.")
+                st.stop()
             if not query.strip():
                 st.warning("Enter an investment query, or press Tab in the empty query box to use the sample prompt.")
                 st.stop()
@@ -1366,6 +1953,11 @@ with body_col:
                 if llm_provider == "gemini"
                 else "qwen2.5:7b"
             )
+            progress_tracker = RecommendationProgress(
+                st.session_state.pending_recommendation_provider,
+                st.session_state.pending_recommendation_model,
+            )
+            st.session_state.recommendation_progress = progress_tracker
             st.session_state.recommendation_job = executor.submit(
                 generate_recommendation,
                 submitted_query,
@@ -1374,6 +1966,7 @@ with body_col:
                 llm_provider,
                 gemini_api_key.strip(),
                 selected_gemini_model,
+                progress_tracker,
             )
             st.rerun()
 
@@ -1388,11 +1981,12 @@ with body_col:
     # ──────────────────────────────────────────────
 
     elif page == "History":
-        st.title("Recommendation History")
+        st.markdown('<div class="market-page-title">Recommendation History</div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:0.8rem"></div>', unsafe_allow_html=True)
 
         recs = st.session_state.recommendations
         if not recs:
-            st.info("No recommendations yet. Go to **Get Recommendation** to generate your first one.")
+            st.info("No recommendations yet. Go to **Recommendation** to generate your first one.")
         else:
             profile_filters = ["All Profiles"] + sorted({get_entry_profile_name(entry) for entry in recs})
             selected_filter = st.selectbox("Profile", options=profile_filters)
