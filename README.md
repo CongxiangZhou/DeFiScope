@@ -2,7 +2,7 @@
 
 > **SC6105 Group 9** — An Intelligent Multi-Agent System for Decentralized Finance Risk Assessment and Portfolio Guidance
 
-DeFiScope is a web-based multi-agent system that delivers personalized risk assessment and portfolio guidance for decentralized finance (DeFi) participants. Four specialized agents collaborate to analyze on-chain protocol data, market sentiment, and individual risk preferences, producing investment recommendations with cryptographic integrity verification.
+DeFiScope is a web-based multi-agent system that delivers personalized risk assessment and portfolio guidance for decentralized finance (DeFi) participants. Four specialized agents collaborate to analyze cached on-chain protocol data, market sentiment, and individual risk preferences, producing investment recommendations with cryptographic integrity verification.
 
 ---
 
@@ -33,8 +33,8 @@ DeFiScope is a web-based multi-agent system that delivers personalized risk asse
                               │
                               ▼
                ┌─────────────────────────────┐
-               │  BlockchainAuditModule      │
-               │     (SHA-256 Hash)          │
+               │   BlockchainAuditModule     │
+               │     (SHA-256 Verify)        │
                └─────────────────────────────┘
                               │
                               ▼
@@ -42,6 +42,8 @@ DeFiScope is a web-based multi-agent system that delivers personalized risk asse
 ```
 
 **Pipeline cost**: 5 LLM calls per recommendation, ~60–120 s with `qwen2.5:7b` on local Ollama.
+
+This implementation uses local Ollama by default and optionally supports Gemini through the Recommendation page provider switch. A Gemini key can be entered in the UI or supplied through `GEMINI_API_KEY`; no key is required when using local Ollama.
 
 ---
 
@@ -71,7 +73,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The Streamlit UI opens at `http://localhost:8501`. Make sure Ollama is running in the background (`ollama serve`) before launching.
+The Streamlit UI opens at `http://localhost:8501`. Make sure Ollama is running in the background (`ollama serve`) before requesting recommendations.
 
 ### Run Tests
 
@@ -97,7 +99,7 @@ DeFiScope/
 ├── requirements.txt        # Python dependencies
 ├── tests/
 │   ├── __init__.py
-│   └── test_agents.py      # 28 unit tests
+│   └── test_agents.py      # 31 unit tests
 └── README.md
 ```
 
@@ -107,11 +109,11 @@ DeFiScope/
 
 | Feature | Implementation |
 |---------|----------------|
-| Risk Profiling Questionnaire | 4-question form → Conservative / Moderate / Aggressive |
-| DeFi Market Overview | Sortable table with TVL, audit, sentiment, risk score |
+| Risk Profiling Questionnaire | 4-question form → five risk bands |
+| DeFi Market Overview | Sortable table with TVL, audit, sentiment score, risk score |
 | Portfolio Recommendation | Multi-agent pipeline with goal decomposition |
 | Recommendation History | Session-state list with timestamps and hashes |
-| Integrity Verification | SHA-256 hash recomputation on demand |
+| Integrity Verification | SHA-256 hash recomputation from recommendation content |
 
 ---
 
@@ -123,7 +125,7 @@ DeFiScope/
 | Agent Framework | Custom Python (LangGraph-inspired) |
 | LLM Backend | Ollama REST API (qwen2.5:7b) |
 | Data Storage | JSON snapshots + Streamlit session state |
-| Audit Module | Python `hashlib` (SHA-256) |
+| Audit Module | Python `hashlib` (local SHA-256 integrity hash) |
 | Methodology | Prometheus AOSE + UML |
 
 ---

@@ -21,10 +21,15 @@ class BlockchainAuditModule:
     def compute_sha256(self, payload: str) -> str:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def _canonical_payload(self, recommendation_dict: dict) -> str:
+        """Serialize recommendation content while excluding generated hash metadata."""
+        payload_dict = dict(recommendation_dict)
+        payload_dict.pop("sha256_hash", None)
+        return json.dumps(payload_dict, sort_keys=True, ensure_ascii=False)
+
     def record_hash(self, recommendation_dict: dict) -> dict:
         """Compute and store hash for a recommendation."""
-        # Serialize the full recommendation payload deterministically
-        payload = json.dumps(recommendation_dict, sort_keys=True, ensure_ascii=False)
+        payload = self._canonical_payload(recommendation_dict)
         sha256_hash = self.compute_sha256(payload)
         timestamp = datetime.now().isoformat()
 
@@ -38,7 +43,7 @@ class BlockchainAuditModule:
 
     def verify_hash(self, recommendation_dict: dict, expected_hash: str) -> bool:
         """Verify that a recommendation matches its recorded hash."""
-        payload = json.dumps(recommendation_dict, sort_keys=True, ensure_ascii=False)
+        payload = self._canonical_payload(recommendation_dict)
         computed = self.compute_sha256(payload)
         return computed == expected_hash
 

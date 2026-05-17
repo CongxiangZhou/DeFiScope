@@ -105,6 +105,19 @@ class TestBlockchainAudit(unittest.TestCase):
         h_b = hashlib.sha256(json.dumps(b, sort_keys=True).encode()).hexdigest()
         self.assertEqual(h_a, h_b)
 
+    def test_audit_module_ignores_stored_hash_field(self):
+        """Stored hash metadata should not invalidate later verification."""
+        from blockchain_audit import BlockchainAuditModule
+
+        audit = BlockchainAuditModule()
+        rec = dict(self.sample_recommendation)
+        rec["sha256_hash"] = ""
+
+        generated_hash = audit.record_hash(rec)["sha256_hash"]
+        rec["sha256_hash"] = generated_hash
+
+        self.assertTrue(audit.verify_hash(rec, generated_hash))
+
 
 # =========================================================================
 # 2. Data Validation Tests
