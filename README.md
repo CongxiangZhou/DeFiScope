@@ -4,6 +4,8 @@
 
 DeFiScope is a web-based multi-agent system that delivers personalized risk assessment and portfolio guidance for decentralized finance (DeFi) participants. Four specialized agents collaborate to analyze cached on-chain protocol data, market sentiment, and individual risk preferences, producing investment recommendations with cryptographic integrity verification.
 
+For the original team repository, including the full pull request history, see [liukefan821/DeFiScope](https://github.com/liukefan821/DeFiScope).
+
 ---
 
 ## Architecture
